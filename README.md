@@ -69,3 +69,5 @@ Integrate with Slack, Teams, or internal portal for seamless access
 AWS Bedrock Documentation: https://aws.amazon.com/bedrock/
 AWS Lex Documentation: https://aws.amazon.com/lex/
 RAG Concept Overview: https://www.amazon.com/blogs/aws/
+
+To view tutorial, please visit here: https://drive.google.com/file/d/1rSbrscSvXJ-y5g7R46wm9UhUFQ0iSUQN/view?usp=sharing
