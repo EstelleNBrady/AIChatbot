@@ -1,73 +1,167 @@
-# **AI-Powered IT Knowledge Assistant**
+# Broughton Partners IT Help Chatbot
 
-_A smart, internal AI chatbot that helps employees access IT policies, FAQs, and troubleshooting guidance before submitting tickets. Built using Amazon Lex, Amazon Bedrock, and S3, leveraging retrieval-augmented generation (RAG) to provide accurate, natural-language responses from your own internal documentation._
+An AI-powered IT support chatbot built for Broughton Partners employees. The bot handles troubleshooting, answers questions using internal IT documentation, routes urgent issues based on business hours, and automatically creates Jira support tickets.
 
-# Features
+---
 
-**Conversational AI:** Ask questions in natural language about IT policies and procedures.
-**RAG-powered responses:** AI grounded in internal S3-hosted documents ensures answers are accurate and up-to-date.
-**Knowledge base integration:** Centralized repository of IT policies, FAQs, and troubleshooting guides.
-**Deployment-ready:** Built with AWS best practices, secure access, and scalable architecture.
+## Features
 
+- **Conversational AI** — Powered by Amazon Bedrock (Claude Haiku 4.5) via LangChain for natural, context-aware responses
+- **Persistent Memory** — Conversation history stored per user in DynamoDB, keyed to their Google account email so memory persists across sessions
+- **RAG from Internal Docs** — Lex QnA intent searches internal IT PDFs stored in S3 and passes relevant context to Claude for grounded responses
+- **Business Hours Routing** — Urgent issues route to a phone number after hours or a Jira ticket link during business hours
+- **Jira Auto-Ticket Creation** — Bot offers to create a Jira Service Request ticket automatically; user confirms via response card buttons
+- **Google SSO** — Employees sign in with their Broughton Partners Google accounts via Cognito
 
+---
 
-# Tech Stack
+## Architecture
+```
+Employee (Browser)
+        ↓
+CloudFront → S3 (Lex Web UI)
+        ↓
+Amazon Cognito (Google SSO)
+        ↓
+Amazon Lex V2
+    ├── QnA Intent → S3 PDF Knowledge Base
+    ├── UrgentITIssueIntent
+    ├── CreateTicketIntent
+    └── FallbackIntent
+        ↓
+AWS Lambda (ITChatbotMemoryHandler)
+    ├── LangChain + Amazon Bedrock (Claude Haiku 4.5)
+    ├── DynamoDB (conversation memory per user)
+    └── Jira API (ticket creation via Secrets Manager)
+```
 
-**Cloud & AI:** Amazon Bedrock (Titan Embeddings & Claude v2), Amazon Lex, S3
-**Backend & Automation:** AWS Lambda, Python
-**Optional Frontend:** Custom web UI or internal portal integration
-**Architecture Concepts:** RAG, serverless, role-based access, conversational AI
+---
 
+## Tech Stack
 
+| Layer | Technology |
+|---|---|
+| Frontend | AWS Lex Web UI (CloudFormation), CloudFront, S3 |
+| Auth | Amazon Cognito with Google OAuth |
+| Bot | Amazon Lex V2 |
+| AI | LangChain + Amazon Bedrock (Claude Haiku 4.5) |
+| Memory | Amazon DynamoDB |
+| Knowledge Base | S3 + Lex QnA (PDF documents) |
+| Ticketing | Jira REST API v3 |
+| Secrets | AWS Secrets Manager |
+| Runtime | AWS Lambda (Python 3.12) |
 
-# Getting Started
+---
 
-**Prerequisites**
+## How It Works
 
--An AWS account with access to Amazon Bedrock
--Access to Titan Embeddings G1 and Anthropic Claude v2 models on Bedrock
--Four example PDFs of IT policies and FAQs (replace with your own documents)
+1. Employee logs in with their Broughton Partners Google account
+2. They describe an IT issue in the chat
+3. Lex routes the message to the appropriate intent:
+   - **QnA intent** — searches internal IT PDFs and passes the result to Lambda
+   - **UrgentITIssueIntent** — checks business hours and routes to phone or ticket
+   - **FallbackIntent / General** — sends message + PDF context to Claude via LangChain
+4. Lambda loads the user's conversation history from DynamoDB (keyed by email)
+5. Claude responds using the PDF context and conversation history
+6. The response and new message are saved back to DynamoDB
+7. If the issue can't be resolved, the bot offers to create a Jira ticket via response card buttons
 
-_-Optional: web UI for the bot (AWS sample repo)_
+---
 
+## Lambda Function Overview
+```python
+lambda_handler()                            # Routes by intent and checks Jira ticket flag
+handle_urgent_issue()                       # Business hours check, offers ticket creation
+handle_general_issue()                      # LangChain + Bedrock + DynamoDB memory
+handle_ticket_creation()                    # Creates Jira Service Request via REST API
+get_user_id()                               # Decodes Cognito JWT to extract user email
+get_history() / save_history()              # DynamoDB read/write
+get_awaiting_ticket() / set_awaiting_ticket()  # Jira confirmation flag
+```
 
+---
 
+## AWS Resources
 
-# Setup Overview
+| Resource | Name / ID |
+|---|---|
+| Lambda | `ITChatbotMemoryHandler` |
+| Lambda Layer | `langchain-bedrock` (version 4) |
+| DynamoDB Table | `ITChatbotMemory` (partition key: `sessionId`) |
+| Lex Bot ID | `1DPWAHDTIL` |
+| Lex Alias | `Timecheckalias` (`Z1ODV2CRD2`) |
+| Secrets Manager | `broughton-jira-token` |
+| S3 Knowledge Base | `troubleshooting-and-policies` |
 
-**Upload Documents to S3:** Store IT policies, FAQs, and troubleshooting guides in an S3 bucket.
-**Create Knowledge Base in Bedrock:** Configure a Bedrock knowledge base to point to the S3 bucket.
-**Build Lex Chatbot:** Connect Lex to Bedrock using a custom intent (QnAIntent) to handle queries.
-**Test & Deploy:** Ensure natural-language responses work as expected. Optional: integrate into internal portal or web UI.
-**Clean-up:** Delete resources when testing is complete to avoid unnecessary costs.
+---
 
+## Lex Intents
 
-# How It Works
+| Intent | Purpose |
+|---|---|
+| `UrgentITIssueIntent` | Routes urgent issues to phone/ticket based on business hours |
+| `FallbackIntent` | Catches general messages, triggers Lambda |
+| `WelcomeIntent` | Greeting handler |
+| `CreateTicketIntent` | Triggered when user confirms ticket creation |
+| QnA Intent | Searches S3 PDFs, passes results to Lambda via session attributes |
 
-Employees ask questions via Amazon Lex chatbot --> Lex forwards queries to Bedrock --> Bedrock uses RAG to retrieve context from S3 documents --> The AI returns accurate, context-aware responses.
+---
 
-# Impact
+## Setup
 
-**Reduced repetitive tickets:** Employees can self-serve answers without waiting for IT support.
-**Improved efficiency:** Faster resolution of common IT questions.
-**Scalable:** Easily expandable to include new IT policies or departments.
+### Lambda IAM Permissions Required
 
-**Usage Example**
-**User:** "How do I reset my Entra password?"
-**Bot:** "To reset your Entra password, navigate to [link] and follow the steps outlined in our internal IT policy guide."
+- `AmazonDynamoDBFullAccess`
+- `AmazonBedrockFullAccess`
+- `SecretsManagerReadWrite`
 
-# Future Enhancements
+### Lambda Configuration
 
-Add analytics to track most common questions and update FAQs automatically
+- **Runtime:** Python 3.12
+- **Timeout:** 30 seconds
+- **Memory:** 512 MB
+- **Layer:** `langchain-bedrock` (includes `langchain-core`, `langchain-aws`)
 
-Expand to other internal departments (HR, Finance)
+### DynamoDB Table
+```
+Table name: ITChatbotMemory
+Partition key: sessionId (String)
+```
 
-Integrate with Slack, Teams, or internal portal for seamless access
+### Secrets Manager
 
-# References
+Store your Jira API token as JSON with secret name `broughton-jira-token`:
+```json
+{
+  "JIRA_API_TOKEN": "your-token-here"
+}
+```
 
-AWS Bedrock Documentation: https://aws.amazon.com/bedrock/
-AWS Lex Documentation: https://aws.amazon.com/lex/
-RAG Concept Overview: https://www.amazon.com/blogs/aws/
+### Update these constants in `lambda_function.py`
+```python
+JIRA_BASE_URL = "https://your-domain.atlassian.net"
+JIRA_EMAIL    = "your-email@company.com"
+JIRA_PROJECT_KEY = "IT"
+```
 
-To view tutorial, please visit here: https://drive.google.com/file/d/1rSbrscSvXJ-y5g7R46wm9UhUFQ0iSUQN/view?usp=sharing
+---
+
+## Key Design Decisions
+
+**Why LangChain?**
+LangChain's `ChatBedrock` and message classes (`HumanMessage`, `AIMessage`, `SystemMessage`) provide a clean abstraction over the raw Bedrock API and make it easy to inject structured conversation history into each prompt.
+
+**Why DynamoDB for memory instead of session attributes?**
+Lex session attributes reset between sessions and can be overwritten by the QnA intent. DynamoDB provides true persistence keyed to the user's identity, surviving across browser sessions and devices.
+
+**Why decode the JWT for user ID?**
+Using the Cognito JWT `preferred_username` (email) instead of the random Lex `sessionId` means the same employee's history is accessible regardless of which device or browser session they use.
+
+**Why a DynamoDB flag for ticket confirmation?**
+The QnA intent intercepts messages before Lambda, which means session attributes set by Lambda may not survive the round trip. Storing the `awaitingTicket` flag in DynamoDB ensures it persists reliably across intent boundaries.
+
+---
+
+## License
+
+Internal use — Broughton Partners
